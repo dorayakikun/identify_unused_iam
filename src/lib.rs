@@ -35,6 +35,10 @@ pub enum Sub {
         path_prefix: Option<String>,
         #[structopt(long = "last-accessed")]
         last_accessed: Option<u64>,
+        #[structopt(long = "include-service-roles")]
+        include_service_roles: bool,
+        #[structopt(long = "exclude-last-accessed-none")]
+        exclude_last_accessed_none: bool,
     },
     #[structopt(
         name = "print-delete-unused-roles-scripts",
@@ -46,6 +50,10 @@ pub enum Sub {
         path_prefix: Option<String>,
         #[structopt(long = "last-accessed")]
         last_accessed: Option<u64>,
+        #[structopt(long = "include-service-roles")]
+        include_service_roles: bool,
+        #[structopt(long = "exclude-last-accessed-none")]
+        exclude_last_accessed_none: bool,
     },
 
     #[structopt(name = "list-unused-policies", about = "Lists the unused policies")]
@@ -75,15 +83,23 @@ pub async fn run() -> Result<()> {
         Sub::ListUnusedRoles {
             path_prefix,
             last_accessed,
+            include_service_roles,
+            exclude_last_accessed_none,
         } => {
-            let unused_roles = fetch_unused_roles(&client, &path_prefix, &last_accessed)
-                .await
-                .wrap_err_with(|| {
-                    format!(
-                        "Failed to fetch unused roles when lists unused roles.\nclient is {:#?}.",
-                        &client
-                    )
-                })?;
+            let unused_roles = fetch_unused_roles(
+                &client,
+                &path_prefix,
+                &last_accessed,
+                include_service_roles,
+                exclude_last_accessed_none,
+            )
+            .await
+            .wrap_err_with(|| {
+                format!(
+                    "Failed to fetch unused roles when lists unused roles.\nclient is {:#?}.",
+                    &client
+                )
+            })?;
 
             let mut wtr = csv::Writer::from_writer(stdout());
 
@@ -98,8 +114,10 @@ pub async fn run() -> Result<()> {
         Sub::PrintDeleteUnusedRolesScripts {
             path_prefix,
             last_accessed,
+            include_service_roles,
+            exclude_last_accessed_none,
         } => {
-            let unused_roles = fetch_unused_roles(&client, &path_prefix, &last_accessed).await.wrap_err_with(
+            let unused_roles = fetch_unused_roles(&client, &path_prefix, &last_accessed, include_service_roles, exclude_last_accessed_none).await.wrap_err_with(
                 || format!("Failed to fetch unused roles when prints delete unused roles scripts.\nclient is {:#?}", &client)
             )?;
 

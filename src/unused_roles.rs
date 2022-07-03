@@ -9,6 +9,7 @@ use aws_sdk_iam::types::DateTime;
 use aws_sdk_iam::Client;
 use eyre::{Result, WrapErr};
 use futures::stream::{FuturesUnordered, StreamExt};
+use regex::Regex;
 use serde::Serialize;
 use std::io::{BufWriter, Write};
 use time::OffsetDateTime;
@@ -72,6 +73,8 @@ pub async fn fetch_unused_roles(
     client: &Client,
     path_prefix: &Option<String>,
     last_accessed: &Option<u64>,
+    include_service_roles: bool,
+    exclude_last_accessed_none: bool,
 ) -> Result<Vec<UnusedRole>> {
     let roles = fetch_roles(client, path_prefix).await?;
 
@@ -89,7 +92,21 @@ pub async fn fetch_unused_roles(
     let unused_roles = roles
         .into_iter()
         .filter_map(|r| r.map_err(|e| errors.push(e)).ok())
-        .filter(|g| is_unused_role(g, last_accessed))
+        .filter(|g| is_unused_role(g, last_accessed, exclude_last_accessed_none))
+        .filter(|g| {
+            if !include_service_roles {
+                if let Some(g) = g.role() {
+                    if let Some(arn) = g.arn() {
+                        let re = Regex::new(
+                            r"^arn:aws:iam::\d{12}:role/(aws-service-role|service-role)/*",
+                        )
+                        .unwrap(); // TODO
+                        return !re.is_match(arn);
+                    }
+                }
+            }
+            true
+        })
         .filter_map(|g| g.role)
         .map(|r| UnusedRole {
             role_name: r.role_name,
@@ -149,26 +166,42 @@ async fn fetch_role_details(
         .await
 }
 
-fn is_unused_role(g: &GetRoleOutput, last_accessed: &Option<u64>) -> bool {
+fn is_unused_role(
+    g: &GetRoleOutput,
+    last_accessed: &Option<u64>,
+    exclude_last_accessed_none: bool,
+) -> bool {
     if let Some(role) = g.role() {
         if let Some(last_used) = role.role_last_used() {
             if let Some(last_used_date) = last_used.last_used_date() {
-                let last_used_date =
-                    OffsetDateTime::from_unix_timestamp_nanos(last_used_date.as_nanos())
-                        .expect("Convert nanos to datetime");
-                let now = OffsetDateTime::now_utc();
-                let diff = now - last_used_date;
-
-                if diff.whole_days() >= last_accessed.unwrap_or(90) as i64 {
-                    return true;
-                }
-                return false;
+                return is_unused(last_accessed, last_used_date);
             } else {
+                // HACK: Even if the last activity is None, there are cases where RoleLastUsed is Some, so processing is also applied here.
+                if exclude_last_accessed_none {
+                    return false;
+                }
+                return true;
+            }
+        } else {
+            if exclude_last_accessed_none {
                 return false;
             }
+            return true;
         }
     }
     return false;
+}
+
+fn is_unused(last_accessed: &Option<u64>, last_used_date: &DateTime) -> bool {
+    let last_used_date = OffsetDateTime::from_unix_timestamp_nanos(last_used_date.as_nanos())
+        .expect("Convert nanos to datetime");
+    let now = OffsetDateTime::now_utc();
+    let diff = now - last_used_date;
+
+    if diff.whole_days() >= last_accessed.unwrap_or(90) as i64 {
+        return true;
+    }
+    false
 }
 
 pub async fn fetch_role_policies_by_unused_role(
