@@ -12,6 +12,7 @@ aws-smithy-types = "0.43.0"
 csv = "1"
 eyre = "0.6"
 futures = "0.3"
+regex = "1"
 serde = { version = "1", features = ["derive"] }
 structopt = { version = "0.3", default-features = false }
 time = "0.3"
